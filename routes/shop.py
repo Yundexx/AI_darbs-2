@@ -1,8 +1,9 @@
-from flask import Blueprint, render_template, redirect, url_for, flash, request
+from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify
 from models import Product, CartItem, Order, OrderItem
 from database import db
 from flask_login import current_user, login_required
 from forms import AddToCartForm, CheckoutForm
+from chatbot_integration.chatbot_service import ChatbotService
 
 shop_bp = Blueprint('shop', __name__, template_folder='../templates')
 
@@ -123,3 +124,39 @@ def checkout():
 def purchase_history():
     orders = current_user.orders.order_by(Order.order_date.desc()).all()
     return render_template('purchase_history.html', title='Purchase History', orders=orders)
+
+@shop_bp.route('/chatbot', methods=['POST'])
+def chatbot_endpoint():
+    """
+    Endpoint for client communication with the chatbot.
+    Expects JSON: { "message": "text", "history": [ { "role": "...", "content": "..." }, ... ] }
+    Returns JSON: { "response": "response text" }
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"response": "Invalid request, JSON body expected."}), 400
+
+    user_message = data.get("message", "")
+    chat_history = data.get("history", [])
+
+    if not user_message:
+        return jsonify({"response": "No message provided."}), 400
+
+    try:
+        # Fetch the current product list
+        products_text = get_products_from_db()
+
+        service = ChatbotService()
+        # Pass the product catalog to the service
+        result = service.get_chatbot_response(
+            user_message,
+            chat_history=chat_history,
+            products_text=products_text
+        )
+
+    except Exception as e:
+        print(f"ChatbotService error: {e}")
+        return jsonify({"response": "Chatbot service failed."}), 500
+
+    response_text = result.get("response", "No response from chatbot.")
+    return jsonify({"response": response_text})
